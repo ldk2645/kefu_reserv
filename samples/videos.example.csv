@@ -1,0 +1,3 @@
+video_id,product_id,canonical_model,intent,title,url,official_source_name,verified_status,customer_shareable,verified_at,is_demo
+VID-DEMO-001,DEMO-001,DEMO-CAM-A,wifi_setup,演示配网教程（不可发送）,https://example.com/demo-placeholder,演示来源,pending,false,,true
+VID-DEMO-002,DEMO-002,DEMO-EAR-B,pairing,演示蓝牙配对（不可发送）,https://example.com/demo-placeholder2,演示来源,rejected,false,,true

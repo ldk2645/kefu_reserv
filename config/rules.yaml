@@ -1,0 +1,34 @@
+# 这些规则用于程序兜底，LLM 不可覆盖程序风险判断。
+privacy:
+  external_api_enabled_by_default: false
+  send_raw_screenshot_to_model: false
+  persist_screenshot_by_default: false
+  log_customer_message: false
+  require_remote_payload_preview: true
+  redact_phone: true
+  redact_address_best_effort: true
+  redact_order_number: true
+knowledge:
+  require_approved: true
+  require_exact_product_model_for_model_specific_steps: true
+  max_knowledge_hits: 5
+  allow_demo_as_production_fact: false
+videos:
+  parse_video_content: false
+  download_video: false
+  customer_shareable_requires_approved: true
+  exact_model_match: true
+  intent_match: true
+  max_suggested_in_draft: 1
+  allow_known_broken_url: false
+risk:
+  R1_uncertain_model_keywords: ["型号不清", "哪个型号", "不知道型号"]
+  R2_commercial_keywords: ["退款", "退钱", "赔偿", "补发", "运费", "到货", "投诉", "仅退款"]
+  R3_safety_keywords: ["鼓包", "漏液", "冒烟", "起火", "烫手", "烧焦", "触电", "电池膨胀"]
+  R3_default_action: "停止继续使用或充电（确保安全情况下），避免拆机，转人工优先处理"
+output:
+  requires_human_review: true
+  may_automatically_send_to_pdd: false
+  copy_only_after_confirmation: true
+  reject_unverified_urls: true
+  reject_operator_persona_in_customer_reply: true

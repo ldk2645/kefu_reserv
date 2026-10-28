@@ -1,0 +1,3 @@
+product_id,brand,product_name,canonical_model,merchant_sku,aliases,category,verified_status,is_demo
+DEMO-001,演示品牌,演示摄像头,DEMO-CAM-A,SHOP-DEMO-01,演示摄像头A,camera,pending,true
+DEMO-002,演示品牌,演示耳机,DEMO-EAR-B,SHOP-DEMO-02,演示耳机B,earbuds,pending,true

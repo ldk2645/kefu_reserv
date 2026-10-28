@@ -1,0 +1,11 @@
+[project]
+name = "pdd-visual-copilot"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Local OCR and human-reviewed customer support drafts"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+qt_api = "pyside6"
+markers = ["ocr: real local OCR integration (models must be installed)"]
