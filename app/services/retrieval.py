@@ -17,7 +17,7 @@ def retrieve(db, product_id, question, demo=False, policies=False, limit=5):
         return []
     rows = db.rows("""SELECT c.id chunk_id,s.id source_id,s.product_id,s.kind source_type,
       s.verified_status,s.title,c.section,c.page,c.content excerpt,s.path,s.source_url,s.is_demo,
-      s.effective_at,s.expires_at FROM knowledge_sources s JOIN knowledge_chunks c ON c.source_id=s.id
+      s.effective_at,s.expires_at,s.local_only FROM knowledge_sources s JOIN knowledge_chunks c ON c.source_id=s.id
       JOIN products p ON p.id=s.product_id WHERE s.product_id=? AND p.active=1
       AND ((s.verified_status='approved' AND s.is_demo=0 AND p.is_demo=0)
         OR (?=1 AND s.is_demo=1 AND s.verified_status='pending'))""", (product_id, int(demo)))

@@ -2,7 +2,6 @@ from threading import Event
 from types import SimpleNamespace
 import pytest
 from PIL import Image
-from PySide6.QtWidgets import QApplication
 
 from app.models import OCRLine
 from app.repositories.db import Database
@@ -12,17 +11,19 @@ from app.ui.main_window import MainWindow
 
 @pytest.fixture
 def window(qtbot, tmp_path):
-    win = MainWindow(Settings(data_dir=tmp_path), Database(tmp_path / "ui.db"))
+    copies=[]
+    win = MainWindow(Settings(data_dir=tmp_path), Database(tmp_path / "ui.db"),clipboard_writer=copies.append)
+    win.test_copies=copies
     qtbot.addWidget(win)
     win.show()
     return win
 
 
 def test_full_offline_ui_review_copy_and_edits(window, qtbot, monkeypatch):
-    import httpx
+    import socket
     def deny(*args, **kwargs):
         raise AssertionError("Mock demo must not call network")
-    monkeypatch.setattr(httpx.Client, "post", deny)
+    monkeypatch.setattr(socket.socket, "connect", deny)
     window.ocr_service = SimpleNamespace(recognize=lambda image: [OCRLine(text="这个演示摄像头怎么首次连接？", confidence=.95, bbox=(10,10,500,50))])
     window.load_demo()
     qtbot.waitUntil(lambda: window.ocr_table.rowCount() == 1, timeout=5000)
@@ -40,7 +41,7 @@ def test_full_offline_ui_review_copy_and_edits(window, qtbot, monkeypatch):
     window.reviewed.setChecked(True)
     assert window.copy_button.isEnabled()
     window.copy_button.click()
-    assert QApplication.clipboard().text() == window.reply.toPlainText()
+    assert window.test_copies == [window.reply.toPlainText()]
     window.reply.insertPlainText("编辑")
     assert not window.reviewed.isChecked()
     window.reviewed.setChecked(True)
@@ -78,10 +79,10 @@ def test_settings_and_knowledge_manager_construct(window, qtbot):
     from app.ui.knowledge_manager import KnowledgeManager
     settings = SettingsDialog(window.settings, window)
     qtbot.addWidget(settings)
-    settings.enabled.setChecked(True)
+    assert not hasattr(settings,'enabled') and not hasattr(settings,'key')
     settings.save()
-    assert "完整" in settings.error.text()
-    assert not window.settings.ai_enabled
+    assert not window.settings.online_ready
+    assert (window.settings.data_dir/'preferences.json').exists()
     manager = KnowledgeManager(window.db, window.settings.data_dir, window)
     qtbot.addWidget(manager)
     assert manager.products.count() == 2
@@ -93,14 +94,35 @@ def test_settings_and_knowledge_manager_construct(window, qtbot):
     assert "演示" in manager.message.text()
 
 
-def test_preview_cancellation_makes_no_request(window, qtbot, catalog_fixture, monkeypatch):
-    from app.services.draft import prepare
-    db, _, _, _, _, ctx = catalog_fixture
-    window.settings.ai_enabled = True
-    window.settings.ai_base_url = "https://fake-provider.test/v1"
-    window.settings.ai_api_key = "fake"
-    window.settings.ai_model = "fake"
-    monkeypatch.setattr(window, "preview_payload", lambda payload: False)
-    window._generate_prepared(ctx, prepare(db, ctx))
-    assert not window.workers
-    assert "取消" in window.status.text()
+def test_ui_has_no_online_preview(window):
+    assert not hasattr(window,'preview_payload')
+    assert '离线' in window.banner.text()
+
+
+@pytest.mark.parametrize('change',['source_withdrawn','product_changed','question_changed','session_changed'])
+def test_real_mode_rechecks_before_copy(catalog_fixture,qtbot,tmp_path,change):
+    db,catalog,product_a,product_b,source,_=catalog_fixture
+    copies=[]
+    win=MainWindow(Settings(data_dir=tmp_path,demo_mode=False),db,clipboard_writer=copies.append)
+    qtbot.addWidget(win)
+    win.product.setCurrentIndex(win.product.findData(product_a))
+    win.question.setPlainText('怎么连接测试网络')
+    win.confirmed.setChecked(True)
+    win.generate_button.click()
+    qtbot.waitUntil(lambda:not win.workers,timeout=5000)
+    assert win.conversation.draft.used_knowledge_ids
+    win.copy_reply()
+    assert not copies
+    win.reviewed.setChecked(True)
+    win.copy_reply()
+    assert len(copies)==1
+    if change=='source_withdrawn':
+        catalog.review_source(source,'deprecated','虚构审核员')
+    elif change=='product_changed':
+        win.product.setCurrentIndex(win.product.findData(product_b))
+    elif change=='question_changed':
+        win.question.setPlainText('虚构的新问题')
+    else:
+        win.new_session()
+    win.copy_reply()
+    assert len(copies)==1

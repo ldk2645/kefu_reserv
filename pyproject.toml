@@ -8,4 +8,4 @@ description = "Local OCR and human-reviewed customer support drafts"
 testpaths = ["tests"]
 pythonpath = ["."]
 qt_api = "pyside6"
-markers = ["ocr: real local OCR integration (models must be installed)"]
+markers = ["ocr: real local OCR integration (models must be installed)", "browser: opt-in visible browser tests using fictional local pages"]

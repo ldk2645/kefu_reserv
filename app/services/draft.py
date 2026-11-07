@@ -3,8 +3,6 @@ import re
 
 from app.models import Draft, ModelReply
 from app.repositories.catalog import Catalog
-from app.services.llm_client import LLMClient, ProviderError
-from app.services.redaction import redact_tree
 from app.services.retrieval import retrieve, INJECTION, tokens
 from app.services.risk import assess
 from app.services.video_links import find_videos, eligible, video_intent
@@ -26,6 +24,10 @@ class Evidence:
     risk: object
     is_demo: bool
 
+    @property
+    def local_only(self):
+        return any(item.local_only for item in self.hits + self.policies + self.videos)
+
 
 def prepare(db, context, demo_mode=False):
     if not context.confirmed_by_user or not context.latest_customer_message.strip():
@@ -40,22 +42,6 @@ def prepare(db, context, demo_mode=False):
     risk = assess(context.latest_customer_message, product, hits, context.conversation_context)
     videos = find_videos(db, context.product_id, context.latest_customer_message) if risk.risk_level < "R2" else []
     return Evidence(product, hits, policies, videos, risk, bool(product and product["is_demo"]))
-
-
-def build_payload(context, evidence):
-    if evidence.is_demo:
-        raise ValueError("虚构演示资料不能提交外部模型")
-    return redact_tree({
-        "confirmed_latest_customer_message": context.latest_customer_message[:1500],
-        "confirmed_conversation_context": context.conversation_context[:1800],
-        "confirmed_model": evidence.product["model"] if evidence.product else None,
-        "verified_knowledge_snippets": [dict(id=h.chunk_id, product_model=evidence.product["model"],
-             page=h.page, excerpt=h.excerpt) for h in evidence.hits[:5] if not h.is_demo],
-        "valid_shop_policies": [dict(id=h.chunk_id, excerpt=h.excerpt) for h in evidence.policies],
-        "approved_video_candidates": [dict(id=v.video_id, title=v.title, intent=v.intent_tags) for v in evidence.videos],
-        "programmatic_risk_flags": evidence.risk.model_dump(),
-        "response_style": {"max_chinese_chars": 130, "max_steps": 2},
-    })
 
 
 def local_reply(context, evidence):
@@ -76,8 +62,11 @@ def local_reply(context, evidence):
         # the only retrieved instruction repeats a step already in the context.
         if "换" in context.conversation_context and "换" in excerpt:
             text = "您好，已了解您尝试过更换配件。麻烦您补充当前的提示或指示灯状态，我再核实后续处理方法。"
+        elif len(excerpt) > 1000:
+            text = "您好，已找到对应资料，具体步骤需要结合您的情况进一步核对。麻烦您说明当前的现象和提示信息。"
+            knowledge_ids = [hit.chunk_id]
         else:
-            text = "您好，对应资料记载：\n" + excerpt[:400] + "\n请先核对是否符合您当前的情况。"
+            text = "您好，对应资料记载：\n" + excerpt + "\n请先核对是否符合您当前的情况。"
             knowledge_ids = [hit.chunk_id]
         videos = [v.video_id for v in evidence.videos[:1]]
     return ModelReply(intent=risk.intent, risk_level=risk.risk_level,
@@ -135,37 +124,23 @@ def validate_text(text, evidence, allow_urls=True):
     return errors
 
 
-def validate_model(reply, evidence):
+def validate_reply(reply, evidence):
     allowed_ids = {h.chunk_id for h in evidence.hits + evidence.policies}
     if not set(reply.used_knowledge_ids) <= allowed_ids:
-        raise ValueError("模型输出了不存在的知识引用")
+        raise ValueError("回复引用了不存在的知识")
     if not set(reply.used_video_ids) <= {v.video_id for v in evidence.videos}:
-        raise ValueError("模型输出了未批准的视频引用")
+        raise ValueError("回复引用了未批准的视频")
     errors = validate_text(reply.customer_reply, evidence, allow_urls=False)
     if errors:
         raise ValueError("；".join(errors))
     if evidence.hits and not reply.used_knowledge_ids:
-        raise ValueError("模型未给出本次资料依据，请人工确认")
+        raise ValueError("回复未给出本次资料依据，请人工确认")
 
 
-def generate(context, evidence, settings, payload=None, client=None, include_video=True):
+def generate(context, evidence, settings, *, include_video=True):
     reply = local_reply(context, evidence)
-    mode = "演示回复（Mock）" if settings.demo_mode else "本地保守草稿（Mock）"
-    note = ""
-    if settings.online_ready and not evidence.is_demo and evidence.risk.risk_level == "R0":
-        if payload is None or payload != build_payload(context, evidence):
-            raise ValueError("在线生成前必须确认本次脱敏数据预览")
-        try:
-            candidate = (client or LLMClient(settings)).generate(payload)
-            validate_model(candidate, evidence)
-            if candidate.risk_level > evidence.risk.risk_level:
-                evidence.risk.risk_level = candidate.risk_level
-                reply = local_reply(context, evidence)
-                note = "模型提示更高风险，已使用本地保守草稿。"
-            else:
-                reply, mode = candidate, "AI 回复 · 待人工审核"
-        except (ProviderError, ValueError):
-            note = "API 失败或输出未通过校验，已回退本地保守草稿；未采用模型原始文本。"
+    mode = "虚构演示草稿" if evidence.is_demo else "离线资料草稿"
+    note = "本地检索与原文引用，未调用外部模型。"
     if evidence.is_demo:
         reply.customer_reply = DEMO_PREFIX + reply.customer_reply
     if include_video and evidence.risk.risk_level < "R2":

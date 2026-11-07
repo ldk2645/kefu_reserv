@@ -46,6 +46,7 @@ class KnowledgeHit(BaseModel):
     source_url: str = ""
     is_demo: bool = False
     score: float = 0
+    local_only: bool = False
 
 
 class VideoSuggestion(BaseModel):
@@ -63,6 +64,7 @@ class VideoSuggestion(BaseModel):
     verified_by: str = ""
     verified_at: str = ""
     last_checked_at: str = ""
+    local_only: bool = False
 
 
 class RiskAssessment(BaseModel):

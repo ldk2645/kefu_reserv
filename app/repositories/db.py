@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS video_links (
  link_status TEXT NOT NULL DEFAULT 'unknown', verified_by TEXT NOT NULL DEFAULT '',
  verified_at TEXT NOT NULL DEFAULT '', last_checked_at TEXT NOT NULL DEFAULT ''
 );
-PRAGMA user_version=1;
 """
 
 
@@ -40,6 +39,23 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            # Additive migration: preserve existing sources and review decisions.
+            for table in ("knowledge_sources", "video_links"):
+                columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+                if "local_only" not in columns:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN local_only INTEGER NOT NULL DEFAULT 0")
+            conn.execute("""CREATE TABLE IF NOT EXISTS kbs_imports (
+                source_id TEXT PRIMARY KEY REFERENCES knowledge_sources(id),
+                article_id TEXT NOT NULL, product_id TEXT NOT NULL REFERENCES products(id),
+                original_model TEXT NOT NULL, captured_at TEXT NOT NULL,
+                UNIQUE(article_id,product_id))""")
+            conn.execute("""CREATE TABLE IF NOT EXISTS kbs_product_bindings (
+                source_id TEXT PRIMARY KEY REFERENCES knowledge_sources(id),
+                article_id TEXT NOT NULL, product_id TEXT NOT NULL REFERENCES products(id),
+                original_brand TEXT NOT NULL, original_model TEXT NOT NULL,
+                confirmed_brand TEXT NOT NULL, confirmed_sku TEXT NOT NULL,
+                confirmation_basis TEXT NOT NULL, confirmed_by TEXT NOT NULL, confirmed_at TEXT NOT NULL)""")
+            conn.execute("PRAGMA user_version=3")
 
     @contextmanager
     def connect(self):

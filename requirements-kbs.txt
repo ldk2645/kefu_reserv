@@ -1,0 +1,2 @@
+# Optional collector; install after the application's requirements.
+selenium>=4.25,<5

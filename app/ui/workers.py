@@ -21,6 +21,6 @@ class Worker(QRunnable):
             self.signals.failed.emit(str(error))
         except Exception:
             # Do not expose HTTP exceptions, keys, file contents, or customer text.
-            self.signals.failed.emit("处理失败。请检查文件、模型或网络配置后重试；也可手动录入。")
+            self.signals.failed.emit("处理失败。请检查本地文件、OCR 模型和目录权限后重试；也可手动录入。")
         finally:
             self.signals.finished.emit()

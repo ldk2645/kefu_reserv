@@ -74,6 +74,9 @@ class Catalog:
 
     def save_video(self, video: VideoSuggestion):
         from app.services.video_links import valid_public_url
+        previous = self.db.rows("SELECT local_only FROM video_links WHERE video_id=?", (video.video_id,))
+        if previous and previous[0]["local_only"]:
+            video.local_only = True
         if not self.product(video.product_id):
             raise ValueError("请先选择准确型号")
         if not valid_public_url(video.url, allow_demo=video.is_demo):

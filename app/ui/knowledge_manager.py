@@ -196,6 +196,7 @@ class KnowledgeManager(QDialog):
             return
         parts = self.catalog.source_chunks(source["id"])
         self.doc_preview.setPlainText(f"型号: {source['model']}\n来源: {source['provenance']}\nURL: {source['source_url']}\n"
+            f"仅限本地使用: {'是' if source['local_only'] else '否'}\n"
             f"原件: {source['path']}\nSHA256: {source['sha256']}\n审核: {source['verified_by']} {source['reviewed_at']}\n\n" +
             "\n\n".join(f"[{c['page'] or '段落'} / {c['section']}] {c['content']}" for c in parts))
 

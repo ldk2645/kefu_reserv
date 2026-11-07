@@ -4,6 +4,9 @@
 !.env.example
 knowledge/
 data/
+# KBS data, private browser sessions, driver cache and reports live only under data/.
+logs/
+browser_sessions/
 models/
 __pycache__/
 .pytest_cache/

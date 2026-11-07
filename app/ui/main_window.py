@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QThreadPool, QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QSplitter, QPlainTextEdit, QComboBox, QCheckBox, QTableWidget, QTableWidgetItem,
-    QFileDialog, QDialog, QDialogButtonBox, QGroupBox, QScrollArea)
+    QFileDialog, QDialog, QGroupBox, QScrollArea)
 
 from app.models import ConfirmedContext
 from app.repositories.catalog import Catalog
@@ -16,7 +16,7 @@ from app.services.capture import capture, load_image, load_region, save_region
 from app.services.conversation import Conversation
 from app.services.demo import seed_demo
 from app.services.ocr import OCRService
-from app.services.draft import prepare, generate, build_payload, review_copy
+from app.services.draft import prepare, generate, review_copy
 from app.settings import ROOT, load_yaml
 from app.ui.workers import Worker
 
@@ -44,9 +44,10 @@ def button(text, callback, primary=False):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings, db):
+    def __init__(self, settings, db, *, clipboard_writer=None):
         super().__init__()
         self.settings, self.db = settings, db
+        self.clipboard_writer = clipboard_writer or (lambda text: QApplication.clipboard().setText(text))
         seed_demo(db, settings.data_dir)
         self.catalog = Catalog(db)
         self.conversation = Conversation()
@@ -59,7 +60,7 @@ class MainWindow(QMainWindow):
         self.capture_id = ""
         self.region_path = settings.data_dir / "region.json"
         self.region = load_region(self.region_path)
-        self.setWindowTitle("小鲸 · PDD 视觉 AI 客服副驾驶")
+        self.setWindowTitle("小鲸 · 离线客服助手")
         self.resize(1240, 920)
         self.setMinimumSize(980, 740)
         self.setStyleSheet(STYLE)
@@ -83,6 +84,7 @@ class MainWindow(QMainWindow):
         header.addWidget(top)
         header.addWidget(button("设置", self.open_settings))
         header.addWidget(button("知识库与视频", self.open_knowledge))
+        header.addWidget(button("接入首个真实商品", self.open_first_product))
         root.addLayout(header)
         self.banner = QLabel()
         self.banner.setObjectName("banner")
@@ -188,7 +190,7 @@ class MainWindow(QMainWindow):
 
     def _mode_banner(self):
         mode = "虚构演示模式：演示资料禁止用于真实客户" if self.settings.demo_mode else "真实资料模式：仅使用经人工批准的资料"
-        backend = "在线 API 已配置（每次发送先预览）" if self.settings.online_ready else "本地 Mock · 无远端模型调用"
+        backend = "离线检索与资料草稿 · 人工审核后复制"
         self.banner.setText(mode + "  |  " + backend)
 
     def _state(self, state, detail=""):
@@ -380,37 +382,9 @@ class MainWindow(QMainWindow):
 
     def _generate_prepared(self, context, evidence):
         self.display_evidence(evidence)
-        payload = None
-        if self.settings.online_ready and not evidence.is_demo and evidence.risk.risk_level == "R0":
-            payload = build_payload(context, evidence)
-            if not self.preview_payload(payload):
-                self._state("idle", "已取消在线调用，没有发送数据。")
-                return
         settings, video = replace(self.settings), self.include_video.isChecked()
         self._state("idle", "正在生成草稿…")
-        self.run_task(lambda: generate(context, evidence, settings, payload, include_video=video), self.draft_finished)
-
-    def preview_payload(self, payload):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("发送前预览 · 人工确认脱敏数据")
-        dialog.resize(760, 650)
-        layout = QVBoxLayout(dialog)
-        note = QLabel("仅下方数据将提交给您配置的模型服务。脱敏可能遗漏姓名/地址，请检查；取消后可修改输入重试。\n目标：" + self.settings.ai_base_url)
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        editor = QPlainTextEdit(json.dumps(payload, ensure_ascii=False, indent=2))
-        editor.setReadOnly(True)
-        layout.addWidget(editor)
-        reviewed = QCheckBox("我已检查隐私，并授权本次发送")
-        layout.addWidget(reviewed)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("确认发送")
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
-        reviewed.toggled.connect(buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-        return dialog.exec() == QDialog.DialogCode.Accepted
+        self.run_task(lambda: generate(context, evidence, settings, include_video=video), self.draft_finished)
 
     def draft_finished(self, draft):
         if draft.context_fingerprint != self.current_context().fingerprint:
@@ -431,7 +405,7 @@ class MainWindow(QMainWindow):
         try:
             text = review_copy(self.db, self.conversation.draft, self.current_context(), self.reply.toPlainText(),
                                self.reviewed.isChecked(), self.settings.demo_mode)
-            QApplication.clipboard().setText(text)
+            self.clipboard_writer(text)
             self._state("copied", "请到 PDD 粘贴发送。")
         except ValueError as error:
             self.show_error(str(error))
@@ -449,11 +423,21 @@ class MainWindow(QMainWindow):
         self.refresh_products()
         self.context_changed()
 
+    def open_first_product(self):
+        from app.ui.first_product import FirstProductDialog
+        dialog=FirstProductDialog(self.db,self.settings,self)
+        if dialog.exec()==QDialog.DialogCode.Accepted and dialog.selected_product_id:
+            self.new_session()
+            self.refresh_products()
+            self.product.setCurrentIndex(self.product.findData(dialog.selected_product_id))
+            self._mode_banner()
+            self._state('idle','真实商品已选中，请输入并确认客户问题。')
+
     def closeEvent(self, event):
         self.conversation.reset()
         self.pool.clear()
         if self.pool.activeThreadCount():
-            self.show_error("后台任务尚在结束，请稍候再关闭（API 有超时限制）。")
+            self.show_error("后台任务尚在结束，请稍候再关闭。")
             event.ignore()
             return
         self.image = None
